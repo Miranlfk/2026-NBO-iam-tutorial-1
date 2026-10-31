@@ -24,7 +24,7 @@ import { AsgardeoJavaScriptClient, type AgentConfig, type TokenResponse } from "
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import dotenv from "dotenv";
 import { createProcessNewFlightDealAlertsTool } from "./ciba-tool.js";
-import { createBindingMessageAgent, createLlmModel, llmProvider } from "./llm.js";
+import { createBindingMessageAgent, createLlmModel, getLlmProvider } from "./llm.js";
 import { createLogger } from "./logger.js";
 import type { AgentRuntime, Flight } from "./models.js";
 import {
@@ -134,6 +134,7 @@ async function createAIAgentRuntime() {
     const nativeTools = [
         createProcessNewFlightDealAlertsTool(agentToken.accessToken, logger),
     ];
+    const llmProvider = getLlmProvider();
     const llmModel = createLlmModel();
     const bindingMessageAgent = createBindingMessageAgent(llmModel);
     const allTools = [...tools, ...nativeTools];
@@ -167,9 +168,19 @@ async function getRuntime({ forceRefresh = false } = {}) {
         });
     }
 
-    runtimePromise = createAIAgentRuntime();
+    const createdRuntime = createAIAgentRuntime();
 
-    return runtimePromise;
+    runtimePromise = createdRuntime;
+    // Forget a failed attempt (for example Asgardeo or the MCP server briefly
+    // unreachable during a token refresh), so the next call tries again
+    // instead of rethrowing the same rejection for the life of the process.
+    createdRuntime.catch(() => {
+        if (runtimePromise === createdRuntime) {
+            runtimePromise = null;
+        }
+    });
+
+    return createdRuntime;
 }
 
 async function runWithFreshRuntime<T>(callback: (runtime: AgentRuntime) => Promise<T>) {

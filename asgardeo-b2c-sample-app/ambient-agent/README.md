@@ -55,6 +55,26 @@ The health endpoint is available at:
 http://localhost:8790/health
 ```
 
+## LLM Provider
+
+`LLM_PROVIDER` selects the model that writes the CIBA binding messages:
+`gemini` (default), `openai`, `claude`, `deepseek`, or `openai-compatible`. The
+last one talks to any OpenAI chat-completions endpoint that expects an OAuth2
+client-credentials bearer token, such as the WSO2 API Manager AI gateway:
+
+```bash
+LLM_PROVIDER=openai-compatible
+MODEL_NAME=gpt-5.2
+LLM_BASE_URL=https://<gateway-host>/llm/1.0.0
+LLM_TOKEN_URL=https://<identity-host>/t/<organization-name>/oauth2/token
+LLM_CLIENT_ID=<client-id>
+LLM_CLIENT_SECRET=<client-secret>
+```
+
+The token is cached and renewed a minute before it expires; if the gateway still
+answers 401, the request is retried once with a new token. No `temperature` is
+sent unless `LLM_TEMPERATURE` is set.
+
 ## Better-Deal Alert Flow
 
 After a flight booking, the B2C frontend stores offline better-deal alert consent through `POST /api/deal-alert-consents`.
