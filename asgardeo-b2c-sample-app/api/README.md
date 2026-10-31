@@ -99,3 +99,5 @@ ASGARDEO_AUDIENCE=your-wayfinder-api-resource-identifier
 ```
 
 When enabled, protected routes require ```Authorization: Bearer <asgardeo-access-token>``` header in the incoming API requests, and the access tokens sent should have the issuer for the configured Asgardeo organization, include one of the configured audiences, and contain the route-specific permissions.
+
+When enabled, the verified token alone identifies the caller: bookings and deal-alert consents are keyed by its `username` claim (then `email`, then `sub`, the same order the MCP server uses), and the `X-Wayfinder-*` headers and user fields in request bodies are ignored. A caller can read, cancel or attach alerts only to bookings under its own key. With `API_REQUIRE_AUTH=false` the headers still name the user, for local demos.

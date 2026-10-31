@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { getRequestUserHint, resolveUser } from "../auth.js";
+import { getRequestUserHint, getUserKey, isAuthRequired, resolveUser } from "../auth.js";
 import {
   cancelBookedFlight,
   createBookingRecord,
@@ -17,6 +17,20 @@ import {
 } from "../utils.js";
 
 function getBookingOwner(request, resolvedUser, bodyUser = {}) {
+  if (isAuthRequired()) {
+    // The verified access token decides whose booking this is; headers and
+    // body fields are ignored.
+    const username = getUserKey(resolvedUser);
+
+    return {
+      id: username,
+      username,
+      email: resolvedUser.email,
+      givenName: resolvedUser.givenName,
+      familyName: resolvedUser.familyName
+    };
+  }
+
   const requestUser = getRequestUserHint(request) || {};
   const username =
     requestUser.username ||
@@ -179,10 +193,12 @@ export function registerBookingRoutes(app) {
     });
   }));
 
-  app.get("/api/bookings/flights/:bookingId", (request, response) => {
+  app.get("/api/bookings/flights/:bookingId", (request: any, response) => {
     const booking = getBookedFlightById(request.params.bookingId);
 
-    if (!booking) {
+    // With API_REQUIRE_AUTH=true only the owner may read it; someone else's
+    // booking is reported as not found rather than forbidden.
+    if (!booking || (isAuthRequired() && booking.username !== getUserKey(request.authenticatedUser))) {
       return sendJson(response, 404, { error: "Flight booking not found" });
     }
 

@@ -200,7 +200,29 @@ function getDemoHeaderUser(request) {
   };
 }
 
+export function isAuthRequired() {
+  return process.env.API_REQUIRE_AUTH === "true";
+}
+
+/**
+ * The key bookings and deal-alert consents are stored under: the username
+ * claim, then email, then sub -- the same order the MCP server uses for OBO and
+ * CIBA tokens, so a booking is found whichever client or agent made it.
+ */
+export function getUserKey(user: any) {
+  return user?.username || user?.email || user?.id;
+}
+
+/**
+ * The X-Wayfinder-* header identity. Local-demo mode only: with
+ * API_REQUIRE_AUTH=true the verified token alone says who the caller is, so a
+ * header (or body field) cannot name another user.
+ */
 export function getRequestUserHint(request) {
+  if (isAuthRequired()) {
+    return null;
+  }
+
   return getDemoHeaderUser(request);
 }
 

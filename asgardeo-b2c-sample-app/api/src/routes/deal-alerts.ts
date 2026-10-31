@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { getRequestUserHint, resolveUser } from "../auth.js";
+import { getRequestUserHint, getUserKey, isAuthRequired, resolveUser } from "../auth.js";
 import {
   getBookedFlightById,
   listAllEnabledDealAlertConsents,
@@ -16,6 +16,11 @@ import {
 } from "../utils.js";
 
 function getUsernameHint(request, resolvedUser, body = {}) {
+  if (isAuthRequired()) {
+    // The verified access token decides whose consent this is.
+    return getUserKey(resolvedUser);
+  }
+
   const requestUser = getRequestUserHint(request) || {};
 
   return (
@@ -46,8 +51,10 @@ async function handleDealAlertConsent(request) {
   }
 
   const booking = getBookedFlightById(bookingId);
+  const callerOwnsBooking = !isAuthRequired()
+    || booking?.username === getUserKey(request.authenticatedUser || await resolveUser(request));
 
-  if (!booking) {
+  if (!booking || !callerOwnsBooking) {
     return {
       statusCode: 404,
       body: { error: "Flight booking not found" }
@@ -181,7 +188,11 @@ export function registerDealAlertRoutes(app) {
     sendJson(response, result.statusCode, result.body);
   }));
 
-  app.get("/api/deal-alert-consents/:username", (request, response) => {
+  app.get("/api/deal-alert-consents/:username", (request: any, response) => {
+    if (isAuthRequired() && request.params.username !== getUserKey(request.authenticatedUser)) {
+      return sendJson(response, 403, { error: "Deal alert consents of another user" });
+    }
+
     sendJson(response, 200, {
       data: listEnabledDealAlertConsents(request.params.username)
     });
