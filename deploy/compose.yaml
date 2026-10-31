@@ -1,0 +1,184 @@
+# Wayfinder B2C demo on one Docker host, behind a TLS-terminating reverse proxy
+# (Caddy). See README.md in this directory.
+#
+# Interpolated from the shell or deploy/.env (see .env.example):
+#   APPS_DOMAIN        public hostnames are <prefix>.${APPS_DOMAIN}
+#   ASGARDEO_BASE_URL  organization base URL, e.g. https://api.example.com/t/<org>
+# Per-service settings and secrets come from env/<service>.env (see the
+# *.env.example files). Values under `environment:` are derived from the two
+# variables above and take precedence over the env files; override one by
+# setting the variable of the same name in deploy/.env.
+
+name: wayfinder
+
+x-service: &service
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  frontend:
+    <<: *service
+    build:
+      context: ../asgardeo-b2c-sample-app/frontend
+    image: ${WAYFINDER_IMAGE_PREFIX:-wayfinder}/frontend:${WAYFINDER_IMAGE_TAG:-latest}
+    env_file:
+      - env/frontend.env
+    environment:
+      # Written to /env-config.js at container start (see the frontend Dockerfile).
+      VITE_ASGARDEO_BASE_URL: ${ASGARDEO_BASE_URL:?set ASGARDEO_BASE_URL}
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.${APPS_DOMAIN:?set APPS_DOMAIN}}
+      VITE_AGENT_API_BASE_URL: ${VITE_AGENT_API_BASE_URL:-https://agents.${APPS_DOMAIN}}
+    ports:
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  api:
+    <<: *service
+    build:
+      # Shared with mcp: the MCP server loads the API's db module.
+      context: ../asgardeo-b2c-sample-app
+      dockerfile: api/Dockerfile
+    image: ${WAYFINDER_IMAGE_PREFIX:-wayfinder}/api:${WAYFINDER_IMAGE_TAG:-latest}
+    env_file:
+      - env/api.env
+    environment:
+      PORT: "8787"
+      DB_PATH: /data/wayfinder.db
+      ASGARDEO_BASE_URL: ${ASGARDEO_BASE_URL:?set ASGARDEO_BASE_URL}
+      CORS_ALLOWED_ORIGINS: ${API_CORS_ALLOWED_ORIGINS:-https://wayfinder.${APPS_DOMAIN:?set APPS_DOMAIN}}
+      AMBIENT_AGENT_URL: http://ambient-agent:8790
+    volumes:
+      - wayfinder-data:/data
+    ports:
+      - "127.0.0.1:${API_HOST_PORT:-8787}:8787"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  mcp:
+    <<: *service
+    build:
+      context: ../asgardeo-b2c-sample-app
+      dockerfile: mcp/Dockerfile
+    image: ${WAYFINDER_IMAGE_PREFIX:-wayfinder}/mcp:${WAYFINDER_IMAGE_TAG:-latest}
+    env_file:
+      - env/mcp.env
+    environment:
+      HOST: 0.0.0.0
+      MCP_PORT: "8000"
+      DB_PATH: /data/wayfinder.db
+      ASGARDEO_BASE_URL: ${ASGARDEO_BASE_URL:?set ASGARDEO_BASE_URL}
+    volumes:
+      - wayfinder-data:/data
+    depends_on:
+      # The API seeds the shared database on first start.
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${MCP_HOST_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8000/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  booking-agent:
+    <<: *service
+    build:
+      context: ../asgardeo-b2c-sample-app/booking-agent
+    image: ${WAYFINDER_IMAGE_PREFIX:-wayfinder}/booking-agent:${WAYFINDER_IMAGE_TAG:-latest}
+    env_file:
+      - env/llm.env
+      - env/booking-agent.env
+    environment:
+      AGENT_SERVER_HOST: 0.0.0.0
+      AGENT_SERVER_PORT: "5001"
+      ASGARDEO_BASE_URL: ${ASGARDEO_BASE_URL:?set ASGARDEO_BASE_URL}
+      JWKS_URL: ${ASGARDEO_BASE_URL}/oauth2/jwks
+      AUTH_ISSUER: ${ASGARDEO_ISSUER:-${ASGARDEO_BASE_URL}/oauth2/token}
+      OBO_REDIRECT_URI: https://agents.${APPS_DOMAIN:?set APPS_DOMAIN}/api/obo/callback
+      ALLOWED_ORIGINS: ${AGENTS_ALLOWED_ORIGINS:-https://wayfinder.${APPS_DOMAIN}}
+      LLM_TOKEN_URL: ${LLM_TOKEN_URL:-${ASGARDEO_BASE_URL}/oauth2/token}
+    depends_on:
+      mcp:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${AGENTS_HOST_PORT:-5001}:5001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+
+  ambient-agent:
+    <<: *service
+    build:
+      context: ../asgardeo-b2c-sample-app/ambient-agent
+    image: ${WAYFINDER_IMAGE_PREFIX:-wayfinder}/ambient-agent:${WAYFINDER_IMAGE_TAG:-latest}
+    env_file:
+      - env/llm.env
+      - env/ambient-agent.env
+    environment:
+      HOST: 0.0.0.0
+      AGENT_PORT: "8790"
+      ASGARDEO_BASE_URL: ${ASGARDEO_BASE_URL:?set ASGARDEO_BASE_URL}
+      LLM_TOKEN_URL: ${LLM_TOKEN_URL:-${ASGARDEO_BASE_URL}/oauth2/token}
+    depends_on:
+      # Loads the MCP tools at startup.
+      mcp:
+        condition: service_healthy
+    # Internal only: the API reaches it as http://ambient-agent:8790. No port is published.
+    expose:
+      - "8790"
+    healthcheck:
+      # Also confirms the agent token and MCP tools are loaded.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8790/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  vc-verifier:
+    <<: *service
+    build:
+      context: ../vc-verifier
+    image: ${WAYFINDER_IMAGE_PREFIX:-wayfinder}/vc-verifier:${WAYFINDER_IMAGE_TAG:-latest}
+    env_file:
+      - env/vc-verifier.env
+    environment:
+      PORT: "3001"
+      HOSTNAME: 0.0.0.0
+      APP_BASE_URL: https://verifier.${APPS_DOMAIN:?set APPS_DOMAIN}
+      VERIFIER_ISSUER: ${VERIFIER_ISSUER:-${ASGARDEO_BASE_URL:?set ASGARDEO_BASE_URL}/oid4vci}
+    ports:
+      - "127.0.0.1:${VERIFIER_HOST_PORT:-3001}:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  # SQLite database shared by api and mcp (both run as uid 1000).
+  wayfinder-data:
+
+networks:
+  default:
+    # Fixed name so a reverse proxy in another Compose project can join it as
+    # an external network and reach the services by name.
+    name: ${WAYFINDER_NETWORK:-wayfinder}

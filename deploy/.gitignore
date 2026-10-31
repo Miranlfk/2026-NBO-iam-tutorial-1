@@ -1,0 +1,3 @@
+# Real settings and secrets: copy the *.example files and fill them in.
+.env
+env/*.env
