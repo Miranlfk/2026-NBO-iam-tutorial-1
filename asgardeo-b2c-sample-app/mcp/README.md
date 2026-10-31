@@ -27,7 +27,7 @@ listed still require a valid token, but no particular scope.
 | `get_locations` | `mcp:get_locations` |
 | `create_booking` | `mcp:create_bookings` |
 | `list_deal_alert_consents` | `mcp:deal-alert-consents:read` |
-| `cancel_booking` | `mcp:create_bookings` |
+| `cancel_booking` | `mcp:cancel_booking` |
 | `transfer_deal_alert_consent` | `mcp:deal-alert-consents:write` |
 | `search_hotels` | — |
 | `get_trips` | — |
@@ -95,7 +95,7 @@ Two distinct failures are reported to the caller:
 
 | Result | Meaning |
 | --- | --- |
-| `invalid_token` | The token failed verification — bad signature, wrong issuer, wrong audience, or expired. |
+| `invalid_token` | The token failed verification — bad signature, wrong issuer, wrong audience, expired, or revoked. |
 | `insufficient_scope` | The token is valid but lacks a scope the tool requires. |
 
 Only the code is returned; the reason is deliberately not disclosed, since it
@@ -106,6 +106,16 @@ on, and the agents must request that same resource when obtaining their tokens
 (`AGENT_RESOURCE` / `OBO_RESOURCE`). The resource chosen at token-request time
 decides both which scopes are granted and the token's audience, so a mismatch
 surfaces as `invalid_token` rather than `insufficient_scope`.
+
+**Revocation.** Signature checks alone accept a token until it expires, so a
+user revoking an agent's access would not stop it. With
+`MCP_INTROSPECTION_CLIENT_ID` and `MCP_INTROSPECTION_CLIENT_SECRET` set (an
+application's client credentials in the same organization), every verified token
+is also introspected at `<ASGARDEO_BASE_URL>/oauth2/introspect`
+(`MCP_INTROSPECTION_ENDPOINT` overrides it); an inactive token is
+`invalid_token`. Answers are cached for `MCP_INTROSPECTION_CACHE_SECONDS`
+(default 5; 0 asks every time), so a revocation stops the agent within that
+time. An unanswered introspection fails closed.
 
 Unlike the REST API's check, roles and permissions are **not** pooled into the
 scope set here: a role name never stands in for a granted scope at this

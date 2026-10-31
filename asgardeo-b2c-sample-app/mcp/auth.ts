@@ -34,7 +34,9 @@ export const ToolScope = {
     get_locations: ["mcp:get_locations"],
     create_booking: ["mcp:create_bookings"],
     list_deal_alert_consents: ["mcp:deal-alert-consents:read"],
-    cancel_booking: ["mcp:create_bookings"],
+    // Its own scope, so a token (or a gateway ACL) can allow booking without
+    // allowing cancellation.
+    cancel_booking: ["mcp:cancel_booking"],
     transfer_deal_alert_consent: ["mcp:deal-alert-consents:write"],
 } as const;
 
@@ -113,6 +115,96 @@ function toStringList(value: unknown): string[] {
     return [];
 }
 
+type IntrospectionResult = { active: boolean; checkedAt: number };
+
+const introspectionCache = new Map<string, IntrospectionResult>();
+
+function getIntrospectionConfig() {
+    const clientId = process.env.MCP_INTROSPECTION_CLIENT_ID?.trim();
+    const clientSecret = process.env.MCP_INTROSPECTION_CLIENT_SECRET?.trim();
+
+    if (!clientId || !clientSecret) {
+        return null;
+    }
+
+    const cacheSeconds = Number.parseInt(process.env.MCP_INTROSPECTION_CACHE_SECONDS || "5", 10);
+
+    return {
+        clientId,
+        clientSecret,
+        endpoint: process.env.MCP_INTROSPECTION_ENDPOINT?.trim() || `${getBaseUrl()}/oauth2/introspect`,
+        cacheMs: Number.isFinite(cacheSeconds) && cacheSeconds > 0 ? cacheSeconds * 1000 : 0,
+    };
+}
+
+/**
+ * Ask the identity provider whether a signature-valid token is still active.
+ * JWKS verification alone accepts a revoked token until it expires, so a user
+ * revoking an agent's access (consent, delegation) would not stop it; this
+ * does, within MCP_INTROSPECTION_CACHE_SECONDS. Enabled when
+ * MCP_INTROSPECTION_CLIENT_ID and MCP_INTROSPECTION_CLIENT_SECRET are set.
+ */
+async function assertActive(token: string, exp: number | undefined) {
+    const config = getIntrospectionConfig();
+
+    if (!config) {
+        return;
+    }
+
+    const now = Date.now();
+    const cached = introspectionCache.get(token);
+
+    if (cached && now - cached.checkedAt < config.cacheMs) {
+        if (!cached.active) {
+            throw new AuthError("invalid_token", "Token is no longer active (revoked)");
+        }
+
+        return;
+    }
+
+    let active: boolean;
+
+    try {
+        const response = await fetch(config.endpoint, {
+            method: "POST",
+            headers: {
+                Authorization: `Basic ${Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64")}`,
+                "Content-Type": "application/x-www-form-urlencoded",
+                Accept: "application/json",
+            },
+            body: new URLSearchParams({ token, token_type_hint: "access_token" }),
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        active = (await response.json() as { active?: unknown }).active === true;
+    } catch (error) {
+        // Fail closed: an unanswered revocation check is not an authorization.
+        throw new AuthError(
+            "invalid_token",
+            `Token introspection failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+    }
+
+    if (config.cacheMs > 0) {
+        for (const [key, value] of introspectionCache) {
+            if (now - value.checkedAt >= config.cacheMs) {
+                introspectionCache.delete(key);
+            }
+        }
+
+        if (!exp || exp * 1000 > now) {
+            introspectionCache.set(token, { active, checkedAt: now });
+        }
+    }
+
+    if (!active) {
+        throw new AuthError("invalid_token", "Token is no longer active (revoked)");
+    }
+}
+
 function getActorSubject(payload: JWTPayload) {
     const actor = payload.act;
 
@@ -126,9 +218,10 @@ function getActorSubject(payload: JWTPayload) {
 }
 
 /**
- * Verify a bearer token's signature against the identity provider's JWKS and
- * validate issuer, audience and expiry. Returns only claims that survived
- * verification -- callers must not read identity from anywhere else.
+ * Verify a bearer token's signature against the identity provider's JWKS,
+ * validate issuer, audience and expiry, and (when configured) check by
+ * introspection that it has not been revoked. Returns only claims that
+ * survived verification -- callers must not read identity from anywhere else.
  */
 export async function verifyClaims(authorization: string | undefined): Promise<VerifiedClaims> {
     const token = authorization?.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
@@ -161,6 +254,8 @@ export async function verifyClaims(authorization: string | undefined): Promise<V
     if (typeof payload.sub !== "string" || !payload.sub) {
         throw new AuthError("invalid_token", "Token is missing a subject claim");
     }
+
+    await assertActive(token, payload.exp);
 
     const actor = getActorSubject(payload);
     const scopes = [
