@@ -628,6 +628,91 @@ async def chat(request: Request, session: UserSession = Depends(get_session)):
     })
 
 
+# ─── Account Assistant ──────────────────────────────────────────────────────
+#
+# Account questions (sessions, consents, communication preferences, profile,
+# sign-in security) go to the Asgardeo self-service MCP server with the user's
+# own access token: the server calls the identity provider as the user, so the
+# assistant can do nothing the user could not do in My Account. The token must
+# carry internal_login (the SPA's sign-in requests it).
+
+SELF_SERVICE_MCP_URL = os.getenv("SELF_SERVICE_MCP_URL", "").strip()
+ACCOUNT_PORTAL_NAME = os.getenv("ACCOUNT_PORTAL_NAME", "My Account").strip() or "My Account"
+
+
+def build_account_system_prompt(session: UserSession) -> str:
+    return f"""You are the Wayfinder account assistant. You help {session.user_name or "the traveller"} with their own \
+Wayfinder account: where they are signed in, their consents and communication preferences (such as marketing emails), \
+their profile, linked accounts and sign-in security.
+
+Today's date is {date.today().isoformat()}.
+
+**Rules:**
+- Use the tools to answer; never guess account data.
+- Before any change (signing out a session, withdrawing a consent, unsubscribing, updating the profile, removing a \
+sign-in method), state exactly what you will change and ask the user to confirm. Act only after they confirm.
+- For anything the tools cannot do, point the user to {ACCOUNT_PORTAL_NAME}.
+- You cannot book or change travel; for that, the user should use the travel assistant.
+- Be brief. Show sessions with device, browser, location and last active time when available."""
+
+
+@app.post("/api/account/chat")
+async def account_chat(request: Request, session: UserSession = Depends(get_session)):
+    """Answer an account question through the self-service MCP server, as the user."""
+    if not SELF_SERVICE_MCP_URL:
+        return JSONResponse(
+            {"type": "error", "message": "The account assistant is not configured (SELF_SERVICE_MCP_URL)."},
+            status_code=503,
+        )
+
+    body = await request.json()
+    user_message = body.get("message", "").strip()
+    if not user_message:
+        return JSONResponse(
+            {"type": "error", "message": "Message cannot be empty."},
+            status_code=400,
+        )
+
+    user_token = request.headers.get("Authorization", "")[7:]
+
+    try:
+        client = MultiServerMCPClient(
+            {
+                "self_service_mcp_server": {
+                    "transport": "streamable_http",
+                    "url": SELF_SERVICE_MCP_URL,
+                    "headers": {"Authorization": f"Bearer {user_token}"},
+                },
+            }
+        )
+        agent = create_agent(get_llm(), await client.get_tools())
+
+        messages = [{"role": "system", "content": build_account_system_prompt(session)}]
+        messages.extend(session.account_history[-(MAX_CHAT_HISTORY_TURNS * 2):])
+        messages.append({"role": "user", "content": user_message})
+
+        response = await agent.ainvoke({"messages": messages})
+    except Exception as e:
+        logger.exception("Account assistant failed")
+        detail = str(e)
+        sub_excs = getattr(e, "exceptions", None)
+        if sub_excs:
+            detail = "; ".join(repr(s) for s in sub_excs)
+        return JSONResponse(
+            {"type": "error", "message": f"Account assistant error: {detail}"},
+            status_code=500,
+        )
+
+    reply = _extract_text(response["messages"][-1].content)
+    session.account_history.append({"role": "user", "content": user_message})
+    session.account_history.append({"role": "assistant", "content": reply})
+    max_msgs = MAX_CHAT_HISTORY_TURNS * 2
+    if len(session.account_history) > max_msgs:
+        del session.account_history[:-max_msgs]
+
+    return JSONResponse({"type": "response", "message": reply})
+
+
 # ─── OBO Flow Endpoints ─────────────────────────────────────────────────────
 
 

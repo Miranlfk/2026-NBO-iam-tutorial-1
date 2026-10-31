@@ -31,6 +31,8 @@ class UserSession:
 
     # Chat state
     chat_history: list[dict] = field(default_factory=list)
+    # The account assistant's own conversation (self-service MCP server).
+    account_history: list[dict] = field(default_factory=list)
     pending_message: Optional[str] = None
 
     # In-progress OBO flow

@@ -13,6 +13,7 @@ Asgardeo organization (`ASGARDEO_BASE_URL`) are read when the containers start.
 | `booking-agent` | `asgardeo-b2c-sample-app/booking-agent` | `Dockerfile` | 5001 | `AGENTS_HOST_PORT` (5001) | `agents.<APPS_DOMAIN>` | `GET /health` |
 | `ambient-agent` | `asgardeo-b2c-sample-app/ambient-agent` | `Dockerfile` | 8790 | none (internal) | none | `GET /health` |
 | `vc-verifier` | `vc-verifier` | `Dockerfile` | 3001 | `VERIFIER_HOST_PORT` (3001) | `verifier.<APPS_DOMAIN>` | `GET /health` |
+| `self-service-mcp` | `self-service-mcp` | `Dockerfile` | 8000 | none (internal) | none | port open |
 
 `api` and `mcp` share the `asgardeo-b2c-sample-app` build context because the MCP
 server loads the API's `api/src/db.ts` in process. They also share the named
@@ -195,11 +196,59 @@ Scopes checked by the API: `bookings:read` (GET bookings), `bookings:write`
 
 **MCP server resource** (`mcp` `ASGARDEO_AUDIENCE` = agents' `AGENT_RESOURCE` =
 `OBO_RESOURCE`). Scopes: `mcp:search_flights`, `mcp:get_locations`,
-`mcp:create_bookings` (create and cancel), `mcp:deal-alert-consents:read`,
-`mcp:deal-alert-consents:write`. `search_hotels`, `get_trips` and
+`mcp:create_bookings`, `mcp:cancel_booking`, `mcp:deal-alert-consents:read`,
+`mcp:deal-alert-consents:write`. Users' role grants all of them; no agent role
+grants `mcp:cancel_booking`, so a gateway ACL (or the token) can allow booking
+without cancelling. `search_hotels`, `get_trips` and
 `get_flight_bookings` need a valid token but no scope. A role is never accepted in
 place of a scope at this boundary. If the REST and MCP scopes share one resource,
 use its identifier for all three settings.
+
+**MCP revocation check** (`mcp` `MCP_INTROSPECTION_CLIENT_ID` / `_SECRET`): an
+application in the organization with client credentials (any confidential app
+works). The MCP server introspects every verified token at
+`<ASGARDEO_BASE_URL>/oauth2/introspect`, so revoking an agent's access in My
+Account (consent, authorized apps) stops it within `MCP_INTROSPECTION_CACHE_SECONDS`.
+
+**Step-up re-authentication** (`frontend` `VITE_STEP_UP_ACR_FACE`,
+`VITE_STEP_UP_ACR_HIGH_VALUE`, `VITE_HIGH_VALUE_FARE_LIMIT`)
+
+- "Verify with face" on the profile page, and paying a fare above
+  `VITE_HIGH_VALUE_FARE_LIMIT` (default 1000; 0 turns it off), sign the user in
+  again with `prompt=login` and `acr_values=face` or `acr_values=high-value`, then
+  return to the page.
+- The SPA's login flow (conditional authentication script) acts on
+  `context.requestedAcr`: `face` adds the face liveness step (iProov), `high-value`
+  calls the external policy service and steps up to TOTP. It must set
+  `context.selectedAcr` to the requested value: the SPA reads `acr` from the ID
+  token to know the step-up happened.
+
+**Profile fields** (`api` `MARKETING_PREFERENCE_NAME`, `frontend` `VITE_MY_ACCOUNT_URL`)
+
+- `GET /api/me/profile` adds `loyaltyId` (custom attribute `loyaltyId`, in any SCIM
+  schema extension), `dateOfBirthProvided` (whether `dateOfBirth` is set; the date
+  is never returned) and `marketing`: the user's subscription to the communication
+  preference named `MARKETING_PREFERENCE_NAME` (default `Marketing`; Preference
+  Management), from `GET /api/users/v1/me/consents` with the user's token.
+- The profile page shows `loyalty_tier` and `crm_tier` from the access token (added
+  by a pre-issue access token action), and links to My Account
+  (`VITE_MY_ACCOUNT_URL`, default `https://myaccount.<idp-domain>/t/<org>/`).
+- Sign-up: add the Marketing preference to the self-registration flow; the Rewards
+  application requests the mobile number as optional.
+
+**Account assistant** (`booking-agent` `SELF_SERVICE_MCP_URL`; `self-service-mcp`)
+
+- `POST /api/account/chat` (the profile page's assistant) runs the agent with the
+  Asgardeo self-service MCP server's tools, called with the user's own SPA token
+  (needs `internal_login`, which the SDK requests). The server is built from
+  `asgardeo/asgardeo-mcp-server` (`cmd/self-service-mcp`) at the commit in
+  `self-service-mcp/Dockerfile`; `CLIENT_ID` = the SPA's client ID.
+
+**Extra sign-in options** (`frontend` `VITE_WALLET_SIGN_IN_CONNECTION`,
+`VITE_SIWE_SIGN_IN_CONNECTION`): the names of the connections for wallet sign-in
+(OpenID4VP, presentation definition for the member credential) and Sign-In with
+Ethereum. Each one set adds an option under Sign in that starts at that connection
+(`fidp=<name>`); both must also be in the SPA's login flow.
 
 **Booking agent** ("Wayfinder Assistant", interactive agent; `AGENT_ID`,
 `AGENT_SECRET`) and its application (`ASGARDEO_CLIENT_ID`, `ASGARDEO_CLIENT_SECRET`)

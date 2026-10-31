@@ -212,6 +212,24 @@ services:
       start_period: 15s
       retries: 3
 
+  self-service-mcp:             # internal: Asgardeo self-service MCP server, for the account assistant
+    <<: *service
+    build:
+      context: ../self-service-mcp
+    image: ${WAYFINDER_IMAGE_PREFIX:-wayfinder}/self-service-mcp:${WAYFINDER_IMAGE_TAG:-latest}
+    env_file:
+      - env/self-service-mcp.env
+    environment:
+      PORT: "8000"
+      BASE_URL: ${ASGARDEO_BASE_URL:?set ASGARDEO_BASE_URL}
+    healthcheck:
+      # /mcp answers only with a user's token: check that the port is open.
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8000"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
 volumes:
   # SQLite database shared by api and mcp (both run as uid 1000).
   wayfinder-data:
