@@ -60,3 +60,21 @@ Preview the production build:
 ```bash
 npm run preview
 ```
+
+## Container image
+
+The `Dockerfile` builds the app once and serves it with nginx (unprivileged,
+port 8080) with a fallback to `index.html` for client-side routes. Configuration
+is read when the container starts, not at build time: the entrypoint writes
+`/env-config.js` from the `VITE_*` environment variables listed in
+`.env.example`, and `src/config.js` prefers those values over the build-time
+ones. The same image therefore works for any domain.
+
+```bash
+docker build -t wayfinder/frontend .
+docker run --rm -p 8080:8080 \
+  -e VITE_ASGARDEO_CLIENT_ID=<client-id> \
+  -e VITE_ASGARDEO_BASE_URL=https://api.asgardeo.io/t/<org> \
+  -e VITE_API_BASE_URL=https://api.example.com \
+  wayfinder/frontend
+```

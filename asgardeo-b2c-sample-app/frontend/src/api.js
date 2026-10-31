@@ -1,5 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8787";
-const AGENT_API_BASE_URL = import.meta.env.VITE_AGENT_API_BASE_URL;
+import { AGENT_API_BASE_URL, API_BASE_URL } from "./config.js";
 
 async function requestJson(path, options = {}) {
   const { auth, authRequired = false, body, ...fetchOptions } = options;

@@ -4,12 +4,13 @@ import { AsgardeoProvider } from "@asgardeo/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App.jsx";
+import { API_BASE_URL, ASGARDEO_BASE_URL, ASGARDEO_CLIENT_ID, ASGARDEO_SCOPES } from "./config.js";
 import "./styles.css";
 
-const clientId = import.meta.env.VITE_ASGARDEO_CLIENT_ID;
-const baseUrl = import.meta.env.VITE_ASGARDEO_BASE_URL;
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8787";
-const requestedScopes = ["bookings:read", "bookings:write", "deal-alert-consents:write"];
+const clientId = ASGARDEO_CLIENT_ID;
+const baseUrl = ASGARDEO_BASE_URL;
+const apiBaseUrl = API_BASE_URL;
+const requestedScopes = ASGARDEO_SCOPES;
 const asgardeoReady = Boolean(clientId && baseUrl);
 const queryClient = new QueryClient({
   defaultOptions: {

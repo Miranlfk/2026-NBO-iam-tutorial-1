@@ -24,34 +24,12 @@ import { PaymentPageWithAuth } from "./pages/PaymentPageWithAuth";
 import { ProfilePageWithAuth } from "./pages/ProfilePageWithAuth";
 import { ResultsPage, ResultsPageWithAuth } from "./pages/ResultsPage";
 import { buildResultsPath, readCriteria } from "./utils/routes";
+import { ASGARDEO_SIGN_UP_URL } from "./config.js";
 import wayfinderLogo from "./assets/wayfinder-logo.png";
 
-const ASGARDEO_BASE_URL = import.meta.env.VITE_ASGARDEO_BASE_URL || "";
-const ASGARDEO_ORG_NAME = getAsgardeoOrgName();
-const SIGN_UP_URL = ASGARDEO_ORG_NAME
-  ? `https://accounts.asgardeo.io/t/${encodeURIComponent(ASGARDEO_ORG_NAME)}/accounts/register`
-  : "https://accounts.asgardeo.io/accounts/register";
-
-function getAsgardeoOrgName() {
-  const configuredOrgName = import.meta.env.VITE_ASGARDEO_ORG_NAME?.trim();
-
-  if (configuredOrgName) {
-    return configuredOrgName;
-  }
-
-  if (!ASGARDEO_BASE_URL) {
-    return "";
-  }
-
-  try {
-    const pathParts = new URL(ASGARDEO_BASE_URL).pathname.split("/").filter(Boolean);
-    const tenantIndex = pathParts.indexOf("t");
-
-    return tenantIndex >= 0 ? pathParts[tenantIndex + 1] || "" : "";
-  } catch {
-    return "";
-  }
-}
+// Self sign-up page: VITE_ASGARDEO_SIGN_UP_URL, or derived from the base URL
+// (api.<domain>/t/<org> -> accounts.<domain>/t/<org>/accounts/register).
+const SIGN_UP_URL = ASGARDEO_SIGN_UP_URL;
 
 function BrandLogo({ className = "" }) {
   return (
@@ -203,7 +181,16 @@ function LiveAuthHeader() {
       <button
         className="cta-button"
         type="button"
-        onClick={() => { window.location.href = SIGN_UP_URL; }}
+        onClick={async () => {
+          if (SIGN_UP_URL) {
+            window.location.href = SIGN_UP_URL;
+
+            return;
+          }
+
+          // No sign-up URL could be derived: the sign-in page offers sign-up.
+          signIn(await createSignInConfigWithCDSTracker());
+        }}
       >
         Sign up
       </button>

@@ -3,8 +3,9 @@ import { useAsgardeo } from "@asgardeo/react";
 import { CircleUserRound, Pencil, Save, ShieldCheck, X } from "lucide-react";
 import { useApiAuth, useProfileQuery, useUpdateProfileMutation } from "../api-queries";
 import { createSignInConfigWithCDSTracker } from "../cds-api";
+import { WALLET_CREDENTIAL_OFFER } from "../config.js";
 
-const walletCredentialOffer = import.meta.env.VITE_WALLET_CREDENTIAL_OFFER || "";
+const walletCredentialOffer = WALLET_CREDENTIAL_OFFER;
 
 function getUserValue(user, keys) {
   for (const key of keys) {

@@ -1,8 +1,7 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8787";
-export const ASGARDEO_CLIENT_ID = import.meta.env.VITE_ASGARDEO_CLIENT_ID || "";
+import { API_BASE_URL } from "./config.js";
 
 // CDS keys `application_data` by the Asgardeo application ID, not the OAuth client ID.
-export const ASGARDEO_APPLICATION_ID = import.meta.env.VITE_ASGARDEO_APPLICATION_ID || "";
+export { ASGARDEO_APPLICATION_ID, ASGARDEO_CLIENT_ID } from "./config.js";
 
 const CDS_PROFILE_ID_STORAGE_KEY = "cds_profile_id";
 const CDS_ANON_TRACKER_STORAGE_KEY = "cds_anonymous_profile_tracker";
