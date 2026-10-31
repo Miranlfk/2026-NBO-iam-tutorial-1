@@ -427,3 +427,7 @@ Follow README.md files in:
 
 Start them in this order: API, MCP server, agents, frontend. The API and the MCP
 server both open the same SQLite database, so seed it once from `api/`.
+
+To run everything on a server with Docker Compose behind a TLS reverse proxy,
+see [deploy/README.md](deploy/README.md): each component has a Dockerfile, and
+all URLs, identity-provider settings and secrets come from the environment.
