@@ -160,7 +160,7 @@ AUTH_ISSUER=https://api.asgardeo.io/t/<organization-name>/oauth2/token
 OBO_REDIRECT_URI=http://localhost:5001/api/obo/callback
 GOOGLE_API_KEY=<google-ai-studio-api-key>
 MODEL_NAME=gemini-3.1-flash-lite
-WAYFINDER_MCP_SERVER_URL=http://localhost:8000/mcp
+MCP_SERVER_URL=http://localhost:8000/mcp
 AGENT_SCOPES=openid profile mcp:search_flights mcp:get_locations
 OBO_SCOPES=openid profile mcp:create_bookings
 AGENT_RESOURCE=<mcp-api-resource-identifier>
@@ -169,6 +169,27 @@ OBO_RESOURCE=<mcp-api-resource-identifier>
 
 Do not commit `.env` files with real client secrets, agent secrets, or LLM API
 keys.
+
+### LLM provider
+
+`LLM_PROVIDER` selects the model: `gemini` (default, `GOOGLE_API_KEY`), `openai`
+(`OPENAI_API_KEY`), or `openai-compatible`. The last one talks to any OpenAI
+chat-completions endpoint that expects an OAuth2 client-credentials bearer token,
+such as the WSO2 API Manager AI gateway:
+
+```bash
+LLM_PROVIDER=openai-compatible
+MODEL_NAME=gpt-5.2
+LLM_BASE_URL=https://<gateway-host>/llm/1.0.0
+LLM_TOKEN_URL=https://<identity-host>/t/<organization-name>/oauth2/token
+LLM_CLIENT_ID=<client-id>
+LLM_CLIENT_SECRET=<client-secret>
+```
+
+The token is cached and renewed a minute before it expires; if the gateway still
+answers 401, the request is retried once with a new token. No `temperature` is
+sent unless `LLM_TEMPERATURE` is set, and `LLM_MAX_COMPLETION_TOKENS` goes out as
+`max_completion_tokens`.
 
 ### 2. Install Python dependencies
 
@@ -220,8 +241,9 @@ AGENT_SERVER_HOST=127.0.0.1 AGENT_SERVER_PORT=5002 python main.py
 - `GET /api/obo/status` - checks whether the current user has an active OBO token.
 - `GET /api/obo/pending` - returns the message that triggered authorization.
 - `POST /api/logout` - clears the user's in-memory agent session.
+- `GET /health` - liveness check (no authentication, no upstream calls).
 
-All API endpoints except the OBO callback expect:
+All API endpoints except the OBO callback and the health check expect:
 
 ```http
 Authorization: Bearer <asgardeo-access-token>

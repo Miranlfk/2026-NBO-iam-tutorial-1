@@ -40,12 +40,12 @@ import httpx
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents import create_agent
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 import uvicorn
 
 from session import SessionStore, UserSession
 from agent_auth import AgentAuth
+from llm import create_llm
 import obo_flow
 
 load_dotenv()
@@ -57,15 +57,18 @@ logger = logging.getLogger(__name__)
 
 def _resolve_wayfinder_mcp_url() -> str:
     """
-    Prefer an explicit WAYFINDER_MCP_SERVER_URL when it's a real http(s) URL.
+    Prefer an explicit MCP_SERVER_URL (or the older WAYFINDER_MCP_SERVER_URL)
+    when it's a real http(s) URL. It may point at the MCP server directly or at
+    a gateway in front of it; the agent's bearer token is passed through as is.
     Otherwise fall back to the Choreo Connection-injected service URL.
     Choreo doesn't expand ${VAR} placeholders in config values, so a value
     like "${CHOREO_HR_SERVER_SERVICEURL}/mcp" reaches us literally — treat
     that as "not set" and use the actual env var instead.
     """
-    explicit = os.getenv("WAYFINDER_MCP_SERVER_URL", "")
-    if explicit.startswith(("http://", "https://")):
-        return explicit
+    for key in ("MCP_SERVER_URL", "WAYFINDER_MCP_SERVER_URL"):
+        explicit = os.getenv(key, "").strip()
+        if explicit.startswith(("http://", "https://")):
+            return explicit
     base = os.getenv("CHOREO_HR_SERVER_SERVICEURL", "").rstrip("/")
     if base:
         return f"{base}/mcp"
@@ -73,8 +76,18 @@ def _resolve_wayfinder_mcp_url() -> str:
 
 
 WAYFINDER_MCP_SERVER_URL = _resolve_wayfinder_mcp_url()
-MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3.1-flash-lite-flash")
 logger.info("WayFinder MCP server URL: %s", WAYFINDER_MCP_SERVER_URL)
+
+# Built on first use and shared across requests, so a gateway token is cached
+# rather than fetched per chat message. LLM_PROVIDER selects the model (llm.py).
+_llm = None
+
+
+def get_llm():
+    global _llm
+    if _llm is None:
+        _llm = create_llm()
+    return _llm
 
 # Cap on chat-history turns replayed to the model per request (user+assistant = 1 turn).
 MAX_CHAT_HISTORY_TURNS = int(os.getenv("MAX_CHAT_HISTORY_TURNS", "20"))
@@ -465,6 +478,15 @@ async def get_session(request: Request) -> UserSession:
     return session
 
 
+# ─── Health ──────────────────────────────────────────────────────────────────
+
+
+@app.get("/health")
+async def health():
+    """Liveness check for container orchestration. No upstream calls."""
+    return {"status": "ok"}
+
+
 # ─── Startup ─────────────────────────────────────────────────────────────────
 
 
@@ -473,6 +495,8 @@ async def startup():
     """Authenticate the agent on startup."""
     logger.info("Authenticating agent with Asgardeo...")
     await agent_auth.ensure_valid_token()
+    # Fail at startup, not on the first chat message, if the LLM is misconfigured.
+    get_llm()
     logger.info("Agent server ready on :5001")
 
 
@@ -500,8 +524,7 @@ async def chat(request: Request, session: UserSession = Depends(get_session)):
         # user's delegated token only for tools the agent cannot run alone.
         tools = await _load_tools(session)
 
-        llm = ChatGoogleGenerativeAI(model=MODEL_NAME, temperature=0.7)
-        agent = create_agent(llm, tools)
+        agent = create_agent(get_llm(), tools)
 
         system_prompt = build_system_prompt(session)
         messages = [{"role": "system", "content": system_prompt}]
