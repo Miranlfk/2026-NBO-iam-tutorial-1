@@ -345,10 +345,10 @@ export default function Home() {
                   <h2>Lounge Access Verified</h2>
                   {verificationClaims && (
                     <div className="verification-details">
-                      {verificationClaims.userid && (
+                      {Boolean(verificationClaims.userid) && (
                         <p><strong>MEMBERSHIP NO:</strong> {String(verificationClaims.userid)}</p>
                       )}
-                      {verificationClaims.member_since && (
+                      {Boolean(verificationClaims.member_since) && (
                         <p><strong>MEMBER SINCE:</strong> {formatDateOnly(verificationClaims.member_since)}</p>
                       )}
                     </div>

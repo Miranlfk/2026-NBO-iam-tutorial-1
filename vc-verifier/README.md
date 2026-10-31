@@ -107,6 +107,19 @@ VERIFIER_REDIRECT_URIS=https://your-app.vercel.app/lounge/complete
 
 The demo uses an in-memory request store. That is acceptable for local demos and warm serverless invocations, but a production-grade Vercel deployment should replace it with durable storage such as Vercel KV because callbacks and polling can hit different serverless instances.
 
+## Container image
+
+The `Dockerfile` builds a Next.js standalone server (`NEXT_OUTPUT=standalone`
+switches `output: 'standalone'` on for that build only) and runs it as a
+non-root user on port 3001 with a `/health` check. Every variable from
+`.env.example` is read from the container environment at request time, so the
+same image works behind any public hostname; set `APP_BASE_URL` to it.
+
+```bash
+docker build -t wayfinder/vc-verifier .
+docker run --rm -p 3001:3001 --env-file .env wayfinder/vc-verifier
+```
+
 ## Signing Config
 
 - `REQUEST_SIGNING_PRIVATE_JWK` (required private JWK JSON)
