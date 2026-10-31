@@ -1,0 +1,26 @@
+{
+  "name": "wayfinder-screen",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Wayfinder in-flight screen: signs in with the OAuth 2.0 device authorization grant and shows the traveller's next trip.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/server.js",
+    "dev": "npm run build && node --env-file=.env dist/server.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.15.19",
+    "@types/qrcode": "^1.5.5",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
