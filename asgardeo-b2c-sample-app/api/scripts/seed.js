@@ -5,10 +5,15 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const apiRoot = resolve(__dirname, "..");
-const configuredDbPath = "wayfinder.sqlite";
+// DB_PATH matches the API's and the MCP server's (src/db.ts), so a container
+// can seed the shared volume. Unset, the database sits next to the API.
+const configuredDbPath = process.env.DB_PATH?.trim() || "wayfinder.sqlite";
 const dbPath = resolve(apiRoot, configuredDbPath);
 const schemaPath = resolve(apiRoot, "schema.sql");
 const forceSeed = process.argv.includes("--force") || process.argv.includes("-f");
+// --if-missing seeds only a database without the catalogue tables, and leaves
+// an existing one (and its bookings) alone. Containers run it on every start.
+const seedIfMissing = process.argv.includes("--if-missing");
 
 const flights = [
   {
@@ -424,11 +429,11 @@ const trips = [
   }
 ];
 
-if (!existsSync(apiRoot)) {
-  mkdirSync(apiRoot, { recursive: true });
+if (!existsSync(dirname(dbPath))) {
+  mkdirSync(dirname(dbPath), { recursive: true });
 }
 
-if (forceSeed) {
+if (forceSeed && !seedIfMissing) {
   for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
     if (existsSync(path)) {
       rmSync(path, { force: true });
@@ -441,9 +446,7 @@ const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
-db.exec(readFileSync(schemaPath, "utf8"));
-
-const insertFlight = db.prepare(`
+const insertFlightSql = `
   INSERT INTO flights (
     id,
     from_city,
@@ -473,9 +476,9 @@ const insertFlight = db.prepare(`
     @dates,
     @tags
   )
-`);
+`;
 
-const insertHotel = db.prepare(`
+const insertHotelSql = `
   INSERT INTO hotels (
     id,
     name,
@@ -493,9 +496,9 @@ const insertHotel = db.prepare(`
     @rating,
     @amenities
   )
-`);
+`;
 
-const insertTrip = db.prepare(`
+const insertTripSql = `
   INSERT INTO trips (
     id,
     title,
@@ -515,9 +518,28 @@ const insertTrip = db.prepare(`
     @total_estimate,
     @currency
   )
-`);
+`;
+
+function hasCatalogueTables() {
+  const present = new Set(
+    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name)
+  );
+
+  return ["flights", "hotels", "trips"].every((table) => present.has(table));
+}
 
 const seed = db.transaction(() => {
+  if (seedIfMissing && hasCatalogueTables()) {
+    return false;
+  }
+
+  db.exec(readFileSync(schemaPath, "utf8"));
+
+  // Prepared after the schema runs: the tables do not exist before it.
+  const insertFlight = db.prepare(insertFlightSql);
+  const insertHotel = db.prepare(insertHotelSql);
+  const insertTrip = db.prepare(insertTripSql);
+
   for (const flight of flights) {
     insertFlight.run(flight);
   }
@@ -529,9 +551,17 @@ const seed = db.transaction(() => {
   for (const trip of trips) {
     insertTrip.run(trip);
   }
+
+  return true;
 });
 
-seed();
+// IMMEDIATE takes the write lock before the check, so two processes starting
+// on a fresh volume cannot both decide to seed.
+const seeded = seed.immediate();
 db.close();
 
-console.log(`Seeded SQLite database at ${dbPath}${forceSeed ? " after force reset" : ""}`);
+console.log(
+  seeded
+    ? `Seeded SQLite database at ${dbPath}${forceSeed ? " after force reset" : ""}`
+    : `SQLite database at ${dbPath} already has the catalogue; left unchanged`
+);

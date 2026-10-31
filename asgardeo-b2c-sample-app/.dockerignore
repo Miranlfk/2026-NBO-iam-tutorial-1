@@ -1,0 +1,15 @@
+# Build context for api/Dockerfile and mcp/Dockerfile is this directory, because
+# the MCP server loads api/src/db.ts in process. Only what those two images need
+# is sent to the builder; everything else (node_modules, .env, local SQLite
+# files, the other apps) stays out.
+*
+!api/package.json
+!api/package-lock.json
+!api/tsconfig.json
+!api/schema.sql
+!api/scripts/seed.js
+!api/src
+!mcp/package.json
+!mcp/package-lock.json
+!mcp/tsconfig.json
+!mcp/*.ts

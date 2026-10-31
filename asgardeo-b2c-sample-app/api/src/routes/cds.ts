@@ -1,7 +1,7 @@
 import {
   asyncHandler,
   extractCookieValue,
-  getAsgardeoBaseUrl,
+  getCDSBaseUrl,
   getCDSToken,
   sendJson
 } from "../utils.js";
@@ -9,7 +9,7 @@ import {
 export function registerCDSRoutes(app) {
   app.post("/api/cds/profiles", asyncHandler(async (request, response) => {
     const token = await getCDSToken();
-    const cdsEndpoint = `${getAsgardeoBaseUrl()}/cds/api/v1/profiles`;
+    const cdsEndpoint = `${getCDSBaseUrl()}/profiles`;
     const cdsResponse = await fetch(cdsEndpoint, {
       method: "POST",
       headers: {
@@ -48,7 +48,7 @@ export function registerCDSRoutes(app) {
   app.get("/api/cds/profiles/:profileId", asyncHandler(async (request, response) => {
     const token = await getCDSToken();
     const cdsEndpoint = new URL(
-      `${getAsgardeoBaseUrl()}/cds/api/v1/profiles/${request.params.profileId}`
+      `${getCDSBaseUrl()}/profiles/${request.params.profileId}`
     );
     const applicationIdentifier = request.query.application_identifier;
     const includeApplicationData = request.query.includeApplicationData;
@@ -86,7 +86,7 @@ export function registerCDSRoutes(app) {
 
   app.patch("/api/cds/profiles/:profileId", asyncHandler(async (request, response) => {
     const token = await getCDSToken();
-    const cdsEndpoint = `${getAsgardeoBaseUrl()}/cds/api/v1/profiles/${request.params.profileId}`;
+    const cdsEndpoint = `${getCDSBaseUrl()}/profiles/${request.params.profileId}`;
     const cdsResponse = await fetch(cdsEndpoint, {
       method: "PATCH",
       headers: {

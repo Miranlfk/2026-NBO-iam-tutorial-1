@@ -4,7 +4,17 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dbPath = resolve(__dirname, "..", "wayfinder.sqlite");
+
+/**
+ * DB_PATH lets the API and the MCP server open the same file from a shared
+ * volume (containers). Unset, it keeps the local default next to the API.
+ * Resolved lazily so a .env loaded after this module is imported still counts.
+ */
+export function getDatabasePath() {
+  const configured = process.env.DB_PATH?.trim();
+
+  return configured ? resolve(configured) : resolve(__dirname, "..", "wayfinder.sqlite");
+}
 
 let db;
 
@@ -260,18 +270,29 @@ function ensureDealAlertConsentCascade(database) {
 }
 
 function getDatabase() {
+  const dbPath = getDatabasePath();
+
   if (!existsSync(dbPath)) {
-    throw new Error("SQLite database not found. Run `npm run seed` from the api directory.");
+    throw new Error(`SQLite database not found at ${dbPath}. Run \`npm run seed\` from the api directory.`);
   }
 
   if (!db) {
     db = new Database(dbPath);
+    // Two processes (the API and the MCP server) open this file. WAL lets
+    // readers proceed while one writes; the seed script sets it too, and it
+    // persists in the file, so this is a no-op on a seeded database.
+    db.pragma("journal_mode = WAL");
     db.pragma("foreign_keys = ON");
     ensureSchema(db);
     db.pragma("foreign_keys = ON");
   }
 
   return db;
+}
+
+/** Open the database (and apply schema upgrades) before serving traffic. */
+export function initializeDatabase() {
+  getDatabase();
 }
 
 function parseJsonArray(value) {

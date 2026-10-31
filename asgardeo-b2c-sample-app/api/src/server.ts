@@ -3,6 +3,7 @@ import { performance } from "node:perf_hooks";
 import "dotenv/config";
 import express from "express";
 import { AuthError, authorizeRequest } from "./auth.js";
+import { initializeDatabase } from "./db.js";
 import { logger } from "./logger.js";
 import { registerBookingRoutes } from "./routes/bookings.js";
 import { registerCDSRoutes } from "./routes/cds.js";
@@ -21,8 +22,27 @@ import {
 } from "./utils.js";
 
 const port = Number(process.env.PORT || 8787);
-const frontendOrigin = process.env.FRONTEND_ORIGIN || "http://localhost:5173";
+// Browser origins allowed to call this API. CORS_ALLOWED_ORIGINS takes a
+// comma-separated list; FRONTEND_ORIGIN (a single origin) is the older name.
+const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || process.env.FRONTEND_ORIGIN || "http://localhost:5173")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
 const app = express();
+
+function getAllowedOrigin(requestOrigin: unknown) {
+  if (allowedOrigins.includes("*")) {
+    return "*";
+  }
+
+  if (typeof requestOrigin === "string" && allowedOrigins.includes(requestOrigin)) {
+    return requestOrigin;
+  }
+
+  // Not an allowed origin: answer with the first configured one, as the single
+  // FRONTEND_ORIGIN did, so the browser rejects the response.
+  return allowedOrigins[0];
+}
 
 function decodeBase64UrlJson(value: string): unknown {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
@@ -76,7 +96,8 @@ function getRequestTokenLogContext(request: any) {
 }
 
 app.use((request: any, response, next) => {
-  response.setHeader("Access-Control-Allow-Origin", frontendOrigin);
+  response.setHeader("Access-Control-Allow-Origin", getAllowedOrigin(request.headers.origin));
+  response.setHeader("Vary", "Origin");
   response.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
   response.setHeader(
     "Access-Control-Allow-Headers",
@@ -159,6 +180,15 @@ app.use((error, request: any, response, _next) => {
   });
 });
 
+// Open the database before accepting traffic, so a missing or unreadable file
+// fails at startup, and schema upgrades run before the MCP server shares it.
+try {
+  initializeDatabase();
+} catch (error) {
+  logger.fatal({ err: error }, "Failed to open the Wayfinder database");
+  process.exit(1);
+}
+
 app.listen(port, () => {
-  logger.info({ port }, `Wayfinder Travel API listening on http://localhost:${port}`);
+  logger.info({ port, allowedOrigins }, `Wayfinder Travel API listening on port ${port}`);
 });

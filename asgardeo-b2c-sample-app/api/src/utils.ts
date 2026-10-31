@@ -152,6 +152,20 @@ export function getAsgardeoBaseUrl() {
   return baseUrl.replace(/\/$/, "");
 }
 
+/**
+ * Base URL of the Customer Data Service REST API (the proxy appends
+ * /profiles...). Defaults to the organization's CDS under ASGARDEO_BASE_URL.
+ */
+export function getCDSBaseUrl() {
+  const configured = process.env.CDS_BASE_URL?.trim();
+
+  if (configured) {
+    return configured.replace(/\/+$/, "");
+  }
+
+  return `${getAsgardeoBaseUrl()}/cds/api/v1`;
+}
+
 export async function getCDSToken() {
   const baseUrl = process.env.ASGARDEO_BASE_URL;
   const clientId = process.env.CDS_ASGARDEO_CLIENT_ID;
@@ -280,8 +294,10 @@ export async function fetchAsgardeoMeProfile(accessToken: string) {
 }
 
 export async function notifyAgentOfNewFlight(flight: any) {
+  const ambientAgentUrl = process.env.AMBIENT_AGENT_URL?.trim().replace(/\/+$/, "");
   const webhookUrl = process.env.AGENT_NEW_FLIGHT_WEBHOOK_URL ||
     process.env.AGENT_DEAL_ALERT_WEBHOOK_URL ||
+    (ambientAgentUrl ? `${ambientAgentUrl}/deal-alerts` : "") ||
     "http://localhost:8790/deal-alerts";
 
   try {
