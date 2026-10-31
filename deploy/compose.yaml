@@ -173,6 +173,45 @@ services:
       start_period: 20s
       retries: 3
 
+  screen:                       # https://screen.${APPS_DOMAIN}: in-flight screen (device authorization grant)
+    <<: *service
+    build:
+      context: ../screen
+    image: ${WAYFINDER_IMAGE_PREFIX:-wayfinder}/screen:${WAYFINDER_IMAGE_TAG:-latest}
+    env_file:
+      - env/screen.env
+    environment:
+      PORT: "8791"
+      ASGARDEO_BASE_URL: ${ASGARDEO_BASE_URL:?set ASGARDEO_BASE_URL}
+      WAYFINDER_API_URL: https://api.${APPS_DOMAIN:?set APPS_DOMAIN}
+    ports:
+      - "127.0.0.1:${SCREEN_HOST_PORT:-8791}:8791"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8791/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  rewards:                      # https://rewards.${APPS_DOMAIN}: Wayfinder Rewards (SAML SP, back-channel logout)
+    <<: *service
+    build:
+      context: ../rewards
+    image: ${WAYFINDER_IMAGE_PREFIX:-wayfinder}/rewards:${WAYFINDER_IMAGE_TAG:-latest}
+    env_file:
+      - env/rewards.env
+    environment:
+      PORT: "8792"
+      PUBLIC_URL: https://rewards.${APPS_DOMAIN:?set APPS_DOMAIN}
+    ports:
+      - "127.0.0.1:${REWARDS_HOST_PORT:-8792}:8792"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8792/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
 volumes:
   # SQLite database shared by api and mcp (both run as uid 1000).
   wayfinder-data:
