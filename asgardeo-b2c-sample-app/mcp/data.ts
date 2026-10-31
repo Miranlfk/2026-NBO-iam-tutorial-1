@@ -30,8 +30,9 @@ limitations under the License.
  * tool layer reports rather than retries.
  *
  * The API's db module is imported at runtime instead of built against: it is
- * plain JS with no type declarations, and its `dbPath` resolves from its own
- * module directory, so it opens the same file regardless of our cwd.
+ * plain JS with no type declarations, and its database path resolves from
+ * DB_PATH or else its own module directory, so it opens the same file as the
+ * API regardless of our cwd.
  */
 
 import { randomUUID } from "node:crypto";
