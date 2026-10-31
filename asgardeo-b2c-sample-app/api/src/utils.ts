@@ -265,6 +265,29 @@ function getScimNameValue(scimUser: any, fieldName: string, fallbackFieldNames: 
   return "";
 }
 
+/**
+ * A SCIM attribute by name, at the top level or in any schema extension
+ * (custom attributes such as loyaltyId live in the custom user schema; the
+ * date of birth in the WSO2 or enterprise one, depending on the server).
+ */
+export function findScimAttribute(scimUser: any, name: string) {
+  if (scimUser?.[name] !== undefined && scimUser[name] !== "") {
+    return scimUser[name];
+  }
+
+  for (const [key, value] of Object.entries(scimUser || {})) {
+    if (key.startsWith("urn:") && value && typeof value === "object" && (value as any)[name] !== undefined) {
+      const found = (value as any)[name];
+
+      if (found !== "") {
+        return found;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 export function mapScimProfile(scimUser: any) {
   return {
     firstName: getScimNameValue(scimUser, "givenName", ["given_name", "givenName"]),
@@ -272,8 +295,46 @@ export function mapScimProfile(scimUser: any) {
     username: scimUser?.userName || getPrimaryScimEmail(scimUser) || "",
     email: getPrimaryScimEmail(scimUser),
     memberSince: scimUser?.meta?.created || "",
+    loyaltyId: String(findScimAttribute(scimUser, "loyaltyId") ?? ""),
+    // Whether a date of birth is on file, never the date itself.
+    dateOfBirthProvided: Boolean(findScimAttribute(scimUser, "dateOfBirth")),
     raw: scimUser
   };
+}
+
+/**
+ * The user's subscription to a communication preference (consent purpose of
+ * type Preference, such as Marketing) from the user consents API, with the
+ * user's own token: { name, subscribed, consentId }. subscribed is null when
+ * the server has no such preference or does not answer.
+ */
+export async function fetchCommunicationPreference(accessToken: string, name: string) {
+  const unknown = { name, subscribed: null as boolean | null, consentId: "" };
+
+  try {
+    const response = await fetch(`${getAsgardeoBaseUrl()}/api/users/v1/me/consents?attributes=purposes&state=ACTIVE`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json"
+      }
+    });
+
+    if (!response.ok) {
+      return unknown;
+    }
+
+    const consents = await response.json().catch(() => []);
+    const wanted = name.toLowerCase();
+    const match = (Array.isArray(consents) ? consents : []).find((consent: any) => (
+      (consent?.purposes || []).some((purpose: any) => (
+        purpose?.type === "Preference" && String(purpose?.name || "").toLowerCase() === wanted
+      ))
+    ));
+
+    return { name, subscribed: Boolean(match), consentId: match?.id || "" };
+  } catch {
+    return unknown;
+  }
 }
 
 export async function fetchAsgardeoMeProfile(accessToken: string) {

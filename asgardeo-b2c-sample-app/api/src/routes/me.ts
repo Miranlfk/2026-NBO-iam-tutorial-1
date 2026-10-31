@@ -2,6 +2,7 @@ import { resolveUser } from "../auth.js";
 import {
   asyncHandler,
   fetchAsgardeoMeProfile,
+  fetchCommunicationPreference,
   getAsgardeoBaseUrl,
   getBearerAccessToken,
   mapScimProfile,
@@ -96,12 +97,20 @@ async function handleProfileFetch(request: any) {
     };
   }
 
-  const profile = await fetchAsgardeoMeProfile(accessToken);
+  const [profile, marketing] = await Promise.all([
+    fetchAsgardeoMeProfile(accessToken),
+    fetchCommunicationPreference(accessToken, getMarketingPreferenceName())
+  ]);
 
   return {
     statusCode: 200,
-    body: { data: mapScimProfile(profile) }
+    body: { data: { ...mapScimProfile(profile), marketing } }
   };
+}
+
+// The communication preference shown on the profile (Preference Management).
+function getMarketingPreferenceName() {
+  return process.env.MARKETING_PREFERENCE_NAME?.trim() || "Marketing";
 }
 
 export function registerMeRoutes(app) {
