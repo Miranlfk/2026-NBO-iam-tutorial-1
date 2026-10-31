@@ -228,6 +228,16 @@ export async function sendAgentChatMessage(message, auth) {
   });
 }
 
+// The booking agent's account mode: the self-service MCP server, with the
+// user's own token.
+export async function sendAccountAssistantMessage(message, auth) {
+  return await requestAgentJson("/api/account/chat", {
+    auth,
+    method: "POST",
+    body: { message }
+  });
+}
+
 export async function getAgentOboUrl(auth) {
   return await requestAgentJson("/api/obo/url", { auth });
 }

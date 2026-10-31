@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAsgardeo } from "@asgardeo/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { ChevronLeft, CreditCard, Eye, EyeOff } from "lucide-react";
+import { ChevronLeft, CreditCard, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import {
   apiQueryKeys,
   useApiAuth,
@@ -11,6 +11,8 @@ import {
 } from "../api-queries";
 import { getBookedFlights } from "../api";
 import { createSignInConfigWithCDSTracker } from "../cds-api";
+import { HIGH_VALUE_FARE_LIMIT, STEP_UP_ACR_HIGH_VALUE } from "../config.js";
+import { startStepUp, useAuthenticationContext } from "../step-up.js";
 import { formatPrice, isActiveBooking, isSameFlight } from "../utils/bookings";
 import { buildFlightDetailsPath } from "../utils/routes";
 
@@ -28,6 +30,12 @@ export function PaymentPageWithAuth({ criteria, flightId }) {
   const [actionError, setActionError] = useState("");
   const error = actionError || flightQuery.error?.message || "";
   const username = user?.userName || user?.username || user?.email || user?.sub || "";
+  const { acr } = useAuthenticationContext();
+  const travelerCount = Number.parseInt(criteria.travelers, 10) || 1;
+  // A fare over the limit is paid only after a high-value re-authentication;
+  // the login flow decides what that takes (an external policy, then TOTP).
+  const needsStepUp = Boolean(flight) && HIGH_VALUE_FARE_LIMIT > 0 && Number(flight.price) > HIGH_VALUE_FARE_LIMIT
+    && acr !== STEP_UP_ACR_HIGH_VALUE;
 
   async function handlePayment() {
     if (!flight) {
@@ -41,7 +49,7 @@ export function PaymentPageWithAuth({ criteria, flightId }) {
       const booking = await createBookingMutation.mutateAsync({
         type: "flight",
         itemId: flight.id,
-        travelers: Number.parseInt(criteria.travelers, 10) || 1,
+        travelers: travelerCount,
         user: {
           id: username,
           username,
@@ -164,13 +172,24 @@ export function PaymentPageWithAuth({ criteria, flightId }) {
                 </div>
               </label>
             </div>
+            {needsStepUp && (
+              <p className="payment-step-up-note" role="note">
+                <ShieldCheck size={16} />
+                <span>
+                  Fares over {formatPrice(flight.currency, HIGH_VALUE_FARE_LIMIT)} need you to confirm it&apos;s you
+                  before payment.
+                </span>
+              </p>
+            )}
             <button
               className="search-button standalone-button"
               type="button"
               disabled={paymentState === "paying"}
-              onClick={handlePayment}
+              onClick={needsStepUp ? () => startStepUp(signIn, STEP_UP_ACR_HIGH_VALUE) : handlePayment}
             >
-              {paymentState === "paying" ? "Processing..." : "Pay and confirm booking"}
+              {paymentState === "paying"
+                ? "Processing..."
+                : needsStepUp ? "Verify it's you and pay" : "Pay and confirm booking"}
             </button>
           </div>
 

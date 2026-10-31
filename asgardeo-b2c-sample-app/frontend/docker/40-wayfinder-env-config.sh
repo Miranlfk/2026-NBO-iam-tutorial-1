@@ -25,7 +25,13 @@ js_string() {
         VITE_ASGARDEO_SCOPES \
         VITE_API_BASE_URL \
         VITE_AGENT_API_BASE_URL \
-        VITE_WALLET_CREDENTIAL_OFFER
+        VITE_WALLET_CREDENTIAL_OFFER \
+        VITE_MY_ACCOUNT_URL \
+        VITE_STEP_UP_ACR_FACE \
+        VITE_STEP_UP_ACR_HIGH_VALUE \
+        VITE_HIGH_VALUE_FARE_LIMIT \
+        VITE_WALLET_SIGN_IN_CONNECTION \
+        VITE_SIWE_SIGN_IN_CONNECTION
     do
         eval "value=\${$name:-}"
         printf '%s  "%s": "%s"' "$separator" "$name" "$(js_string "$value")"

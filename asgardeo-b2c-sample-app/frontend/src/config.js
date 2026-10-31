@@ -57,6 +57,29 @@ function deriveSignUpUrl(baseUrl, orgName) {
   }
 }
 
+/**
+ * My Account, the self-service portal, on the host paired with the API host
+ * (api.<domain> -> myaccount.<domain>) at /t/<org>.
+ */
+function deriveMyAccountUrl(baseUrl, orgName) {
+  try {
+    const url = new URL(baseUrl);
+
+    if (!url.hostname.startsWith("api.")) {
+      return "";
+    }
+
+    url.hostname = `myaccount.${url.hostname.slice("api.".length)}`;
+    url.pathname = orgName ? `/t/${encodeURIComponent(orgName)}/` : "/";
+    url.search = "";
+    url.hash = "";
+
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
 export const ASGARDEO_CLIENT_ID = read(
   runtimeEnv.VITE_ASGARDEO_CLIENT_ID,
   import.meta.env.VITE_ASGARDEO_CLIENT_ID
@@ -107,4 +130,45 @@ export const AGENT_API_BASE_URL = read(
 export const WALLET_CREDENTIAL_OFFER = read(
   runtimeEnv.VITE_WALLET_CREDENTIAL_OFFER,
   import.meta.env.VITE_WALLET_CREDENTIAL_OFFER
+);
+
+export const MY_ACCOUNT_URL = read(
+  runtimeEnv.VITE_MY_ACCOUNT_URL,
+  import.meta.env.VITE_MY_ACCOUNT_URL,
+  deriveMyAccountUrl(ASGARDEO_BASE_URL, ASGARDEO_ORG_NAME)
+);
+
+// Step-up re-authentication: the acr_values the Wayfinder login flow acts on.
+// "Verify with face" asks for STEP_UP_ACR_FACE; a payment above
+// HIGH_VALUE_FARE_LIMIT (total, in the fare's currency; 0 turns it off) asks
+// for STEP_UP_ACR_HIGH_VALUE before it goes through.
+export const STEP_UP_ACR_FACE = read(
+  runtimeEnv.VITE_STEP_UP_ACR_FACE,
+  import.meta.env.VITE_STEP_UP_ACR_FACE,
+  "face"
+);
+
+export const STEP_UP_ACR_HIGH_VALUE = read(
+  runtimeEnv.VITE_STEP_UP_ACR_HIGH_VALUE,
+  import.meta.env.VITE_STEP_UP_ACR_HIGH_VALUE,
+  "high-value"
+);
+
+export const HIGH_VALUE_FARE_LIMIT = Number.parseFloat(read(
+  runtimeEnv.VITE_HIGH_VALUE_FARE_LIMIT,
+  import.meta.env.VITE_HIGH_VALUE_FARE_LIMIT,
+  "1000"
+)) || 0;
+
+// Extra sign-in options: the names of the identity provider's connections for
+// wallet sign-in (OpenID4VP) and Sign-In with Ethereum. Each one set adds a
+// button that starts sign-in straight at that connection (fidp); empty hides it.
+export const WALLET_SIGN_IN_CONNECTION = read(
+  runtimeEnv.VITE_WALLET_SIGN_IN_CONNECTION,
+  import.meta.env.VITE_WALLET_SIGN_IN_CONNECTION
+);
+
+export const SIWE_SIGN_IN_CONNECTION = read(
+  runtimeEnv.VITE_SIWE_SIGN_IN_CONNECTION,
+  import.meta.env.VITE_SIWE_SIGN_IN_CONNECTION
 );

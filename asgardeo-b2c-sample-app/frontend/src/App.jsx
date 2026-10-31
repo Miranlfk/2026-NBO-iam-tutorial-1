@@ -4,7 +4,8 @@ import {
   ChevronDown,
   CircleUserRound,
   LogOut,
-  ShieldCheck
+  ShieldCheck,
+  Wallet
 } from "lucide-react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useApiAuth, useLocationQuery } from "./api-queries";
@@ -24,12 +25,20 @@ import { PaymentPageWithAuth } from "./pages/PaymentPageWithAuth";
 import { ProfilePageWithAuth } from "./pages/ProfilePageWithAuth";
 import { ResultsPage, ResultsPageWithAuth } from "./pages/ResultsPage";
 import { buildResultsPath, readCriteria } from "./utils/routes";
-import { ASGARDEO_SIGN_UP_URL } from "./config.js";
+import { ASGARDEO_SIGN_UP_URL, SIWE_SIGN_IN_CONNECTION, WALLET_SIGN_IN_CONNECTION } from "./config.js";
+import { takeReturnPath } from "./step-up.js";
 import wayfinderLogo from "./assets/wayfinder-logo.png";
 
 // Self sign-up page: VITE_ASGARDEO_SIGN_UP_URL, or derived from the base URL
 // (api.<domain>/t/<org> -> accounts.<domain>/t/<org>/accounts/register).
 const SIGN_UP_URL = ASGARDEO_SIGN_UP_URL;
+
+// More ways to sign in, each straight at its connection (fidp): a wallet
+// presenting the Wayfinder member credential (OpenID4VP), Sign-In with Ethereum.
+const EXTRA_SIGN_IN_OPTIONS = [
+  { connection: WALLET_SIGN_IN_CONNECTION, label: "Sign in with wallet" },
+  { connection: SIWE_SIGN_IN_CONNECTION, label: "Sign in with Ethereum" }
+].filter((option) => option.connection);
 
 function BrandLogo({ className = "" }) {
   return (
@@ -165,19 +174,52 @@ function LiveAuthHeader() {
     );
   }
 
+  async function startSignIn(extraParams = {}) {
+    const signInConfig = await createSignInConfigWithCDSTracker();
+
+    signIn({ ...signInConfig, ...extraParams });
+  }
+
   return (
-    <div className="auth-cluster">
+    <div className="auth-cluster account-menu-wrap" ref={accountMenuRef}>
       <button
         className="primary-button"
         type="button"
         disabled={isLoading}
-        onClick={async () => {
-          const signInConfig = await createSignInConfigWithCDSTracker();
-          signIn(signInConfig);
+        aria-expanded={EXTRA_SIGN_IN_OPTIONS.length ? isAccountMenuOpen : undefined}
+        aria-haspopup={EXTRA_SIGN_IN_OPTIONS.length ? "menu" : undefined}
+        onClick={() => {
+          if (EXTRA_SIGN_IN_OPTIONS.length) {
+            setIsAccountMenuOpen((current) => !current);
+
+            return;
+          }
+
+          startSignIn();
         }}
       >
         Sign in
       </button>
+      {isAccountMenuOpen && EXTRA_SIGN_IN_OPTIONS.length > 0 && (
+        <div className="account-menu" role="menu">
+          <button className="account-menu-item" type="button" role="menuitem" onClick={() => startSignIn()}>
+            <CircleUserRound size={18} />
+            <span>Sign in</span>
+          </button>
+          {EXTRA_SIGN_IN_OPTIONS.map((option) => (
+            <button
+              key={option.connection}
+              className="account-menu-item"
+              type="button"
+              role="menuitem"
+              onClick={() => startSignIn({ fidp: option.connection })}
+            >
+              <Wallet size={18} />
+              <span>{option.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <button
         className="cta-button"
         type="button"
@@ -294,6 +336,34 @@ function LandingRoute({ authReady, category, cdsProfileId, locations, onProfileR
   }
 
   return <HomePage category={category} locations={locations} onSearch={onSearch} />;
+}
+
+/**
+ * After a step-up re-authentication the SDK lands on the site root; go back to
+ * the page that asked for it (payment, profile). Checked once per page load,
+ * when the session is first ready: the page that starts a step-up has already
+ * checked, so it never takes the path back before its redirect.
+ */
+function StepUpReturn() {
+  const { isLoading, isSignedIn } = useAsgardeo();
+  const navigate = useNavigate();
+  const checkedRef = useRef(false);
+
+  useEffect(() => {
+    if (isLoading || !isSignedIn || checkedRef.current) {
+      return;
+    }
+
+    checkedRef.current = true;
+
+    const path = takeReturnPath();
+
+    if (path) {
+      navigate(path, { replace: true });
+    }
+  }, [isLoading, isSignedIn, navigate]);
+
+  return null;
 }
 
 function LiveCDSProfileBootstrap({ cdsProfileId, onProfileCreated }) {
@@ -582,6 +652,7 @@ function App({ authReady }) {
 
       {authReady ? (
         <>
+          <StepUpReturn />
           <LiveLocationsLoader onLocationsLoaded={setLocations} />
           <LiveCDSProfileBootstrap cdsProfileId={cdsProfileId} onProfileCreated={setCdsProfileId} />
         </>

@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useAsgardeo } from "@asgardeo/react";
-import { CircleUserRound, Pencil, Save, ShieldCheck, X } from "lucide-react";
+import { BadgeCheck, CircleUserRound, ExternalLink, Pencil, Save, ScanFace, ShieldCheck, X } from "lucide-react";
 import { useApiAuth, useProfileQuery, useUpdateProfileMutation } from "../api-queries";
 import { createSignInConfigWithCDSTracker } from "../cds-api";
-import { WALLET_CREDENTIAL_OFFER } from "../config.js";
+import { MY_ACCOUNT_URL, STEP_UP_ACR_FACE, WALLET_CREDENTIAL_OFFER } from "../config.js";
+import { startStepUp, useAuthenticationContext } from "../step-up.js";
+import { AccountAssistant } from "../components/AccountAssistant";
 
 const walletCredentialOffer = WALLET_CREDENTIAL_OFFER;
 
@@ -71,6 +73,58 @@ function getProfileEmail(profile) {
   return "";
 }
 
+function decodeJwtClaims(token) {
+  try {
+    const payload = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+
+    return JSON.parse(atob(payload.padEnd(payload.length + ((4 - (payload.length % 4)) % 4), "=")));
+  } catch {
+    return {};
+  }
+}
+
+/** Business claims a pre-issue access token action adds (loyalty_tier, crm_tier). */
+function useTokenClaims(isSignedIn) {
+  const { getAccessToken } = useAsgardeo();
+  const [claims, setClaims] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!isSignedIn) {
+      return undefined;
+    }
+
+    getAccessToken()
+      .then((token) => {
+        if (!cancelled) {
+          setClaims(decodeJwtClaims(token || ""));
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [getAccessToken, isSignedIn]);
+
+  return claims;
+}
+
+function describeMarketing(marketing) {
+  if (!marketing || marketing.subscribed === null || marketing.subscribed === undefined) {
+    return "Not set";
+  }
+
+  return marketing.subscribed ? "Subscribed" : "Not subscribed";
+}
+
+function formatAuthTime(seconds) {
+  return seconds
+    ? new Date(seconds * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+    : "";
+}
+
 function formatMemberSince(value) {
   if (!value) {
     return "Not available";
@@ -118,6 +172,10 @@ export function ProfilePageWithAuth() {
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const isSaving = updateProfileMutation.isPending;
+  const tokenClaims = useTokenClaims(isSignedIn);
+  const authContext = useAuthenticationContext();
+  const verifiedWithFace = authContext.acr === STEP_UP_ACR_FACE;
+  const membership = profileQuery.data || {};
   const firstName = profile.firstName;
   const lastName = profile.lastName;
   const email = profile.email;
@@ -260,6 +318,7 @@ export function ProfilePageWithAuth() {
       )}
 
       <section className="profile-panel" aria-label="Profile information">
+        <div className="profile-stack">
         <div className="profile-card">
           <div className="profile-card-header">
             <div className="profile-avatar" aria-hidden="true">
@@ -335,6 +394,75 @@ export function ProfilePageWithAuth() {
           )}
         </div>
 
+        <div className="profile-card" aria-label="Membership and preferences">
+          <div className="profile-card-header">
+            <div className="profile-avatar" aria-hidden="true">
+              <BadgeCheck size={34} />
+            </div>
+            <div>
+              <span>Membership and preferences</span>
+              <h2>Wayfinder Rewards</h2>
+              <p>From your account and your current token.</p>
+            </div>
+          </div>
+          <div className="profile-details">
+            <dl>
+              <div>
+                <dt>Loyalty ID</dt>
+                <dd>{membership.loyaltyId || "Not set"}</dd>
+              </div>
+              <div>
+                <dt>Marketing emails</dt>
+                <dd>{describeMarketing(membership.marketing)}</dd>
+              </div>
+              <div>
+                <dt>Date of birth</dt>
+                <dd>{membership.dateOfBirthProvided ? "On file" : "Not provided"}</dd>
+              </div>
+              <div>
+                <dt>Loyalty tier (token)</dt>
+                <dd>{tokenClaims.loyalty_tier || "Not in token"}</dd>
+              </div>
+              <div>
+                <dt>CRM tier (token)</dt>
+                <dd>{tokenClaims.crm_tier || "Not in token"}</dd>
+              </div>
+            </dl>
+          </div>
+          {MY_ACCOUNT_URL && (
+            <a className="profile-accent-button profile-link-button" href={MY_ACCOUNT_URL} target="_blank" rel="noreferrer">
+              <ExternalLink size={16} />
+              <span>Manage your account in My Account</span>
+            </a>
+          )}
+        </div>
+
+        <div className="profile-card" aria-label="Sign-in security">
+          <div className="profile-card-header">
+            <div className="profile-avatar" aria-hidden="true">
+              <ScanFace size={34} />
+            </div>
+            <div>
+              <span>Sign-in security</span>
+              <h2>{verifiedWithFace ? "Verified with face" : "Verify it's you"}</h2>
+              <p>
+                {verifiedWithFace
+                  ? `Face verification at ${formatAuthTime(authContext.authTime)}.`
+                  : "Confirm your identity with a face scan before sensitive changes."}
+              </p>
+            </div>
+          </div>
+          <button
+            className="profile-primary-button profile-link-button"
+            type="button"
+            onClick={() => startStepUp(signIn, STEP_UP_ACR_FACE)}
+          >
+            <ScanFace size={16} />
+            <span>{verifiedWithFace ? "Verify with face again" : "Verify with face"}</span>
+          </button>
+        </div>
+        </div>
+
         <aside className="membership-id-panel" aria-label="Membership ID">
           <div className="membership-id-heading">
             <ShieldCheck size={22} />
@@ -352,6 +480,8 @@ export function ProfilePageWithAuth() {
           <p>Use this QR code as your Wayfinder membership ID.</p>
         </aside>
       </section>
+
+      <AccountAssistant />
     </main>
   );
 }
