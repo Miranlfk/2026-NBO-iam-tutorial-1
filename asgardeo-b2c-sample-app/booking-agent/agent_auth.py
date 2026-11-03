@@ -6,9 +6,11 @@
   Manages the agent's own identity token using Asgardeo's App Native
   Authentication flow. The agent authenticates as a first-class identity
   (registered under Console > Agents) — not via client credentials.
-  Auto-refreshes the token when it approaches expiry (30-second buffer).
+  Auto-refreshes the token when it approaches expiry (30-second buffer), and
+  on request when a resource server refuses it (see renew()).
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -62,6 +64,10 @@ class AgentAuth:
         )
         self._token = None
         self._expires_at: float = 0.0
+        # One fetch at a time: each new token for this agent replaces (revokes)
+        # the previous one, so concurrent fetches would leave a caller holding
+        # a token that is already invalid.
+        self._lock = asyncio.Lock()
 
     @property
     def asgardeo_config(self) -> AsgardeoConfig:
@@ -73,22 +79,43 @@ class AgentAuth:
         """Agent configuration for SDK calls."""
         return self._agent_config
 
+    def _is_fresh(self) -> bool:
+        return self._token is not None and time.time() < (self._expires_at - REFRESH_BUFFER_SECONDS)
+
     async def ensure_valid_token(self):
         """Return a valid agent token, refreshing if needed."""
-        if self._token and time.time() < (self._expires_at - REFRESH_BUFFER_SECONDS):
+        if self._is_fresh():
             return self._token
 
-        scopes = _required_env("AGENT_SCOPES").split()
-        logger.info("Obtaining agent token via manual App Native Auth flow...")
-        self._token = await self._obtain_agent_token(scopes)
+        async with self._lock:
+            if self._is_fresh():  # another caller refreshed it meanwhile
+                return self._token
 
-        if hasattr(self._token, "expires_in") and self._token.expires_in:
-            self._expires_at = time.time() + self._token.expires_in
-        else:
-            self._expires_at = time.time() + 3600
+            scopes = _required_env("AGENT_SCOPES").split()
+            logger.info("Obtaining agent token via manual App Native Auth flow...")
+            self._token = await self._obtain_agent_token(scopes)
 
-        logger.info("Agent token obtained for scopes: " + " ".join(scopes))
-        return self._token
+            if hasattr(self._token, "expires_in") and self._token.expires_in:
+                self._expires_at = time.time() + self._token.expires_in
+            else:
+                self._expires_at = time.time() + 3600
+
+            logger.info("Agent token obtained for scopes: " + " ".join(scopes))
+            return self._token
+
+    async def renew(self, refused_access_token: str):
+        """Replace a token a resource server refused, and return a valid one.
+
+        A token is refused before it expires when it was revoked, or replaced:
+        a new token for this agent obtained anywhere else (another instance, a
+        test) revokes this one. Callers refused with the same token share one
+        renewal.
+        """
+        async with self._lock:
+            if self._token is not None and self._token.access_token == refused_access_token:
+                self._token = None
+                self._expires_at = 0.0
+        return await self.ensure_valid_token()
 
     async def _obtain_agent_token(self, scopes: list[str]) -> OAuthToken:
         """Run Asgardeo's direct authorization-code flow for an AI agent."""

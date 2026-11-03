@@ -40,6 +40,7 @@ import httpx
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents import create_agent
+from mcp.types import CallToolResult, TextContent
 
 import uvicorn
 
@@ -262,8 +263,8 @@ using the internally available tools.
 - Be clear and concise. Include relevant details like names, dates, and status."""
 
 
-def _create_mcp_client(access_token: str) -> MultiServerMCPClient:
-    """Create an MCP client with the given access token."""
+def _create_mcp_client(access_token: str, interceptor=None) -> MultiServerMCPClient:
+    """Create an MCP client with the given access token (and a tool call interceptor)."""
     return MultiServerMCPClient(
         {
             "wayfinder_mcp_server": {
@@ -271,8 +272,55 @@ def _create_mcp_client(access_token: str) -> MultiServerMCPClient:
                 "url": WAYFINDER_MCP_SERVER_URL,
                 "headers": {"Authorization": f"Bearer {access_token}"},
             },
-        }
+        },
+        tool_interceptors=[interceptor] if interceptor else None,
     )
+
+
+def _token_refused(result) -> bool:
+    """Whether a tool result is the MCP server refusing the bearer token.
+
+    The server answers invalid_token when the token is revoked, replaced or
+    otherwise not valid (W5: it introspects every token), before running the
+    tool.
+    """
+    return bool(getattr(result, "isError", False)) and any(
+        getattr(block, "text", None) == "invalid_token"
+        for block in getattr(result, "content", None) or []
+    )
+
+
+def _renew_refused_agent_token(access_token: str):
+    """Tool call interceptor for the tools on the agent's own token.
+
+    A new token for this agent obtained anywhere else (another instance, a
+    test) revokes the one this process holds. When the MCP server refuses it,
+    get a new agent token and send the call once more: nothing ran the first
+    time. If the new token is refused too (the agent was deactivated), the
+    call fails as before.
+    """
+    async def intercept(request, handler):
+        result = await handler(request)
+        if not _token_refused(result):
+            return result
+        logger.warning("The MCP server refused the agent token for %s: getting a new one and retrying once", request.name)
+        token = await agent_auth.renew(access_token)
+        return await handler(request.override(headers={"Authorization": f"Bearer {token.access_token}"}))
+
+    return intercept
+
+
+async def _report_revoked_delegation(request, handler):
+    """Tool call interceptor for the tools on the user's delegated (OBO) token.
+
+    The agent cannot renew that token alone: a refusal means the user withdrew
+    the agent's access (My Account, 4b) or it was revoked. Reported as
+    delegation_revoked, so the chat handler asks the user to authorize again.
+    """
+    result = await handler(request)
+    if _token_refused(result):
+        return CallToolResult(content=[TextContent(type="text", text="delegation_revoked")], isError=True)
+    return result
 
 
 # Tools the agent has no scope of its own for. These act on the user's behalf,
@@ -291,12 +339,14 @@ async def _load_tools(session: UserSession):
     handler turns into an OBO prompt.
     """
     agent_token = await agent_auth.ensure_valid_token()
-    agent_tools = await _create_mcp_client(agent_token.access_token).get_tools()
+    agent_tools = await _create_mcp_client(
+        agent_token.access_token, _renew_refused_agent_token(agent_token.access_token)
+    ).get_tools()
 
     if not session.has_valid_obo:
         return agent_tools
 
-    obo_tools = await _create_mcp_client(session.obo_token.access_token).get_tools()
+    obo_tools = await _create_mcp_client(session.obo_token.access_token, _report_revoked_delegation).get_tools()
     obo_by_name = {tool.name: tool for tool in obo_tools}
 
     return [
@@ -329,9 +379,24 @@ def _check_tool_errors(response) -> tuple:
             content = str(message.content)
             if "token_expired" in content:
                 return "token_expired", content
+            if "delegation_revoked" in content:
+                return "delegation_revoked", content
             if "insufficient_scope" in content:
                 return "insufficient_scope", content
     return None, None
+
+
+def _delegation_revoked_response(session: UserSession, user_message: str) -> JSONResponse:
+    """The user withdrew the agent's access: forget the delegated token and ask again."""
+    logger.info("Delegated token refused for user %s: asking for consent again", session.user_sub)
+    session.obo_token = None
+    session.obo_scopes = []
+    session.obo_expires_at = 0.0
+    session.pending_message = user_message
+    return JSONResponse({
+        "type": "obo_required",
+        "message": "Your authorization for bookings was withdrawn. Authorize again to continue.",
+    })
 
 # def _auth_error_mentions_create_booking(message: str | None) -> bool:
 #     """Best-effort guard for raised tool exceptions that include tool context."""
@@ -558,6 +623,8 @@ async def chat(request: Request, session: UserSession = Depends(get_session)):
              # Check for auth-related errors in tool responses
 
         error_message = str(e)
+        if any("delegation_revoked" in message for message in _iter_exception_messages(e)):
+            return _delegation_revoked_response(session, user_message)
         if "insufficient_scope" in error_message:
             if not session.has_valid_obo and not session.obo_expired:
                 session.pending_message = user_message
@@ -591,6 +658,9 @@ async def chat(request: Request, session: UserSession = Depends(get_session)):
      # Check for auth-related errors in tool responses
     error_type, _ = _check_tool_errors(response)
     agent_reply = _extract_text(response["messages"][-1].content)
+
+    if error_type == "delegation_revoked":
+        return _delegation_revoked_response(session, user_message)
 
     if error_type == "token_expired":
         session.pending_message = user_message
