@@ -2,7 +2,9 @@
 # (Caddy). See README.md in this directory.
 #
 # Interpolated from the shell or deploy/.env (see .env.example):
-#   APPS_DOMAIN        public hostnames are <prefix>.${APPS_DOMAIN}
+#   APPS_DOMAIN        public hostnames are <prefix>.${APPS_DOMAIN}, unless
+#                      FRONTEND_, API_, AGENTS_, VERIFIER_ or REWARDS_PUBLIC_HOST
+#                      names one (the proxy must serve the same names)
 #   ASGARDEO_BASE_URL  organization base URL, e.g. https://api.example.com/t/<org>
 # Per-service settings and secrets come from env/<service>.env (see the
 # *.env.example files). Values under `environment:` are derived from the two
@@ -30,8 +32,8 @@ services:
     environment:
       # Written to /env-config.js at container start (see the frontend Dockerfile).
       VITE_ASGARDEO_BASE_URL: ${ASGARDEO_BASE_URL:?set ASGARDEO_BASE_URL}
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.${APPS_DOMAIN:?set APPS_DOMAIN}}
-      VITE_AGENT_API_BASE_URL: ${VITE_AGENT_API_BASE_URL:-https://agents.${APPS_DOMAIN}}
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://${API_PUBLIC_HOST:-api.${APPS_DOMAIN:?set APPS_DOMAIN}}}
+      VITE_AGENT_API_BASE_URL: ${VITE_AGENT_API_BASE_URL:-https://${AGENTS_PUBLIC_HOST:-agents.${APPS_DOMAIN}}}
     ports:
       - "127.0.0.1:${FRONTEND_HOST_PORT:-8080}:8080"
     healthcheck:
@@ -54,7 +56,7 @@ services:
       PORT: "8787"
       DB_PATH: /data/wayfinder.db
       ASGARDEO_BASE_URL: ${ASGARDEO_BASE_URL:?set ASGARDEO_BASE_URL}
-      CORS_ALLOWED_ORIGINS: ${API_CORS_ALLOWED_ORIGINS:-https://wayfinder.${APPS_DOMAIN:?set APPS_DOMAIN}}
+      CORS_ALLOWED_ORIGINS: ${API_CORS_ALLOWED_ORIGINS:-https://${FRONTEND_PUBLIC_HOST:-wayfinder.${APPS_DOMAIN:?set APPS_DOMAIN}}}
       AMBIENT_AGENT_URL: http://ambient-agent:8790
     volumes:
       - wayfinder-data:/data
@@ -109,8 +111,8 @@ services:
       ASGARDEO_BASE_URL: ${ASGARDEO_BASE_URL:?set ASGARDEO_BASE_URL}
       JWKS_URL: ${ASGARDEO_BASE_URL}/oauth2/jwks
       AUTH_ISSUER: ${ASGARDEO_ISSUER:-${ASGARDEO_BASE_URL}/oauth2/token}
-      OBO_REDIRECT_URI: https://agents.${APPS_DOMAIN:?set APPS_DOMAIN}/api/obo/callback
-      ALLOWED_ORIGINS: ${AGENTS_ALLOWED_ORIGINS:-https://wayfinder.${APPS_DOMAIN}}
+      OBO_REDIRECT_URI: https://${AGENTS_PUBLIC_HOST:-agents.${APPS_DOMAIN:?set APPS_DOMAIN}}/api/obo/callback
+      ALLOWED_ORIGINS: ${AGENTS_ALLOWED_ORIGINS:-https://${FRONTEND_PUBLIC_HOST:-wayfinder.${APPS_DOMAIN}}}
       LLM_TOKEN_URL: ${LLM_TOKEN_URL:-${ASGARDEO_BASE_URL}/oauth2/token}
     depends_on:
       mcp:
@@ -162,7 +164,7 @@ services:
     environment:
       PORT: "3001"
       HOSTNAME: 0.0.0.0
-      APP_BASE_URL: https://verifier.${APPS_DOMAIN:?set APPS_DOMAIN}
+      APP_BASE_URL: https://${VERIFIER_PUBLIC_HOST:-verifier.${APPS_DOMAIN:?set APPS_DOMAIN}}
       VERIFIER_ISSUER: ${VERIFIER_ISSUER:-${ASGARDEO_BASE_URL:?set ASGARDEO_BASE_URL}/oid4vci}
     ports:
       - "127.0.0.1:${VERIFIER_HOST_PORT:-3001}:3001"
@@ -183,7 +185,7 @@ services:
     environment:
       PORT: "8791"
       ASGARDEO_BASE_URL: ${ASGARDEO_BASE_URL:?set ASGARDEO_BASE_URL}
-      WAYFINDER_API_URL: https://api.${APPS_DOMAIN:?set APPS_DOMAIN}
+      WAYFINDER_API_URL: https://${API_PUBLIC_HOST:-api.${APPS_DOMAIN:?set APPS_DOMAIN}}
     ports:
       - "127.0.0.1:${SCREEN_HOST_PORT:-8791}:8791"
     healthcheck:
@@ -202,7 +204,7 @@ services:
       - env/rewards.env
     environment:
       PORT: "8792"
-      PUBLIC_URL: https://rewards.${APPS_DOMAIN:?set APPS_DOMAIN}
+      PUBLIC_URL: https://${REWARDS_PUBLIC_HOST:-rewards.${APPS_DOMAIN:?set APPS_DOMAIN}}
     ports:
       - "127.0.0.1:${REWARDS_HOST_PORT:-8792}:8792"
     healthcheck:
